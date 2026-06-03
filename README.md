@@ -1,445 +1,149 @@
-# 🚀 SdkworkFS PRD（V2增强版）
-
-## —— 文件系统形态的边缘应用分发与同步引擎
-
----
-
-# 一、产品定义（升级版）
-
-## 1.1 产品定位
-
-**SdkworkFS 是一个跨平台的“文件系统形态的应用分发与数据同步系统”**，通过本地文件系统接口，将云对象存储与本地运行环境无缝融合。
-
-它让开发者和应用：
-
-* 像操作本地磁盘一样操作云数据
-* 像运行本地应用一样运行 Web 应用
-* 自动完成同步、缓存、更新
-
----
-
-## 1.2 核心能力一句话
-
-> **让云端应用与数据“本地化运行”，同时保持自动同步能力**
-
----
-
-## 1.3 核心价值（强化）
-
-| 能力     | 价值          |
-| ------ | ----------- |
-| 文件系统接口 | 对应用 100% 透明 |
-| 本地镜像运行 | 极致性能        |
-| 自动同步   | 无需部署        |
-| 双向写入   | 支持数据回传      |
-| 离线能力   | 稳定可靠        |
-
----
-
-# 二、核心设计原则（新增）
-
-1. **运行时必须本地化（绝不依赖远程读取）**
-2. **文件系统只是接口，不承担核心逻辑**
-3. **同步系统是唯一数据真相来源**
-4. **写操作必须可控（策略化）**
-5. **所有更新必须原子化**
-
----
-
-# 三、核心功能模块（细化）
-
----
-
-## 3.1 文件系统层（FS Layer）
-
-### 目标
-
-提供标准文件接口：
-
-* open / read / write / stat / rename
-
-### 实现
-
-* Linux：FUSE
-* macOS：macFUSE
-* Windows：WinFSP
-
----
-
-### ⚠️ 使用策略（关键）
-
-| 场景       | 是否使用     |
-| -------- | -------- |
-| IDE / 调试 | ✅        |
-| CLI 操作   | ✅        |
-| 生产服务     | ❌（走本地文件） |
-
----
-
-## 3.2 本地文件运行层（核心）
-
-路径示例：
-
-```bash
-/apps/app1/current/
-```
-
-特点：
-
-* 完全真实文件
-* 被 Nginx 或应用直接访问
-* 不经过 FUSE
-
----
-
-## 3.3 Sync Engine（系统灵魂）
-
----
-
-### 3.3.1 职责
-
-* 云 → 本地同步
-* 本地 → 云同步（写回）
-* 增量更新
-* 冲突处理
-* 离线恢复
-
----
-
-### 3.3.2 同步模型（关键升级）
-
-#### 三类数据：
-
-| 类型   | 示例          | 同步方式       |
-| ---- | ----------- | ---------- |
-| 静态资源 | js/css/html | 单向（云 → 本地） |
-| 用户数据 | json/db     | 双向         |
-| 临时数据 | cache       | 本地         |
-
----
-
----
-
-## 3.4 文件写入系统（重点强化）
-
----
-
-### 3.4.1 写入策略模型
-
-```json
-{
-  "writeMode": "LOCAL | ASYNC_SYNC | SYNC_STRONG",
-  "conflictPolicy": "LAST_WRITE | VERSION | MANUAL"
-}
-```
-
----
-
-### 3.4.2 三种写入模式
-
----
-
-#### ✅ 1. LOCAL（本地模式）
-
-```bash
-写入 → 本地文件
-```
-
-特点：
-
-* 不同步云端
-* 极快
-
-适用：
-
-* cache
-* 临时文件
-
----
-
-#### ✅ 2. ASYNC_SYNC（默认推荐）
-
-```bash
-写入 → 本地 → 异步上传云端
-```
-
-流程：
-
-```text
-write()
-  ↓
-写入本地
-  ↓
-加入同步队列
-  ↓
-后台上传
-```
-
-特点：
-
-* 用户无感
-* 高性能
-* 最常用
-
----
-
-#### ✅ 3. SYNC_STRONG（强一致）
-
-```bash
-写入 → 云端成功 → 返回
-```
-
-特点：
-
-* 强一致
-* 慢
-
-适用：
-
-* 配置
-* 核心数据
-
----
-
-## 3.5 冲突处理（增强）
-
-策略：
-
-### 默认：
-
-* Last Write Wins（时间戳）
-
-### 高级：
-
-* 版本号对比
-* 生成冲突文件：
-
-```bash
-file.txt.conflict-<timestamp>
-```
-
----
-
-## 3.6 版本系统（Manifest）
-
----
-
-### 示例：
-
-```json
-{
-  "version": "1.0.3",
-  "files": [
-    {
-      "path": "index.html",
-      "hash": "abc123",
-      "size": 1024
-    }
-  ]
-}
-```
-
----
-
-### 功能：
-
-* 增量更新
-* 文件校验
-* 快速比对
-
----
-
-## 3.7 原子更新机制（关键）
-
-```bash
-/apps/app1/
-  v1/
-  v2/
-  current -> v2
-```
-
----
-
-更新流程：
-
-1. 下载到 v3/
-2. 校验完整性
-3. 切换软链
-4. 删除旧版本（延迟）
-
----
-
-# 四、系统流程（重点）
-
----
-
-## 4.1 发布流程
-
-```text
-开发者上传 → OSS
-       ↓
-更新 manifest
-       ↓
-客户端检测更新
-       ↓
-增量下载
-       ↓
-原子切换
-```
-
----
-
-## 4.2 写入流程（关键）
-
-```text
-应用 write()
-   ↓
-写入本地
-   ↓
-写入策略判断
-   ↓
-加入同步队列
-   ↓
-上传云端
-```
-
----
-
-## 4.3 离线流程
-
-```text
-断网
- ↓
-写入进入队列
- ↓
-恢复网络
- ↓
-自动同步
-```
-
----
-
-# 五、配置系统（增强）
-
-```yaml
-apps:
-  app1:
-    storage: s3://bucket/app1
-    writeMode: ASYNC_SYNC
-    cacheSize: 1GB
-    syncInterval: 5s
-```
-
----
-
-# 六、CLI设计（产品化）
-
-```bash
-sdkfs mount app1
-sdkfs sync app1
-sdkfs push app1
-sdkfs status app1
-sdkfs logs app1
-```
-
----
-
-# 七、性能设计（强化）
-
----
-
-## 7.1 优化策略
-
-* 本地文件优先
-* LRU缓存
-* 并发下载
-* 热文件预加载
-* 元数据缓存
-
----
-
-## 7.2 性能目标
-
-| 指标   | 目标      |
-| ---- | ------- |
-| 本地读取 | 接近SSD   |
-| 同步延迟 | < 2s    |
-| 更新切换 | < 100ms |
-
----
-
-# 八、安全设计（新增）
-
-* 数据加密（可选）
-* Token认证
-* 多租户隔离
-* 文件权限控制
-
----
-
-# 九、商业化能力（强化）
-
----
-
-## 9.1 SaaS能力
-
-* 应用分发平台
-* 企业私有部署
-* 多租户管理
-
----
-
-## 9.2 收费模型
-
-* 存储
-* 流量
-* 同步次数
-* 应用数量
-
----
-
-# 十、版本规划（升级）
-
----
-
-## V1（MVP）
-
-* 本地同步
-* Manifest
-* 基础写入策略
-
----
-
-## V2
-
-* FUSE支持
-* 多应用
-* 冲突处理
-
----
-
-## V3
-
-* P2P分发
-* 内置Server（替代 Nginx）
-
----
-
-## V4
-
-* 边缘计算
-* AI运行环境
-
----
-
-# 十一、总结（最终版本）
-
-> SdkworkFS = 文件系统接口 + 同步引擎 + 本地运行时
-
-真正核心是：
-
-🔥 **Sync Engine（同步系统）**
-
-文件系统只是“让一切变得透明”的壳。
-
----
+# SdkworkFS
+
+SdkworkFS 是一个面向多语言应用分发、版本切换、Git 托管、对象存储和跨节点运行的文件系统平台。自本轮架构重设开始，**整个系统的目标实现基线统一切换为全 Rust**。
+
+需要特别说明：
+
+- 后续设计、模块边界、API、部署方式和实现路径，**以 `/docs/架构` 中的 Rust 文档为唯一基线**。
+- 本仓库目标是落地 Rust workspace。
+- 架构文档只维护当前 Rust 基线。
+
+## 目标能力
+
+SdkworkFS 的目标能力包括：
+
+- 支持 React、Node.js、Java、Python、静态资源、二进制应用的统一发布模型
+- 支持 Git、S3 标准对象存储、本地上传三类入口统一收敛为 `Release + Manifest`
+- 支持完整 Git server 能力，包括 Smart HTTP、Git over SSH、镜像、双向同步、hook 和 push 触发发布
+- 支持本地真实目录物化、挂载访问、快速切换、快速回滚
+- 支持多级缓存，包括内存缓存、对象磁盘缓存、物化目录缓存
+- 支持多机器分布式集群、节点编排、异步任务、审计与可观测性
+
+## Rust 目标架构
+
+目标实现采用单仓库、多二进制、多 crate 的 Rust workspace：
+
+- `sdkworkfs-gateway`
+  - 统一入口，承载管理 API、运行时 API、Git HTTP 入口、认证、限流、幂等
+- `sdkworkfs-control`
+  - 控制面核心，负责资源状态、发布编排、策略、审计、查询投影
+- `sdkworkfs-job-runner`
+  - 异步任务执行器，负责同步、镜像、构建、发布、激活、回滚、GC
+- `sdkworkfs-git-server`
+  - Git 服务，负责 Smart HTTP、SSH、receive-pack、upload-pack、LFS、push 收据
+- `sdkworkfsd`
+  - 节点守护进程，负责挂载、缓存、物化、切换、回源、写回
+- `sdkworkfs`
+  - CLI，负责初始化、发布、诊断、运维和本地控制
+
+共享能力收敛到 `crates/` 下的共享库，例如：
+
+- `sdkworkfs-core`
+- `sdkworkfs-config`
+- `sdkworkfs-contracts`
+- `sdkworkfs-domain`
+- `sdkworkfs-persistence-pg`
+- `sdkworkfs-persistence-sqlite`
+- `sdkworkfs-orchestrator`
+- `sdkworkfs-scheduler`
+- `sdkworkfs-object`
+- `sdkworkfs-git`
+- `sdkworkfs-process`
+- `sdkworkfs-build-core`
+- `sdkworkfs-build-nodejs`
+- `sdkworkfs-build-java`
+- `sdkworkfs-build-python`
+- `sdkworkfs-cache`
+- `sdkworkfs-materialize`
+- `sdkworkfs-mount`
+- `sdkworkfs-security`
+- `sdkworkfs-observability`
+
+## 关键边界
+
+为避免后续实现再次出现“控制面、Git、任务执行、节点运行时”混写，当前架构明确采用以下边界：
+
+- `sdkworkfs-gateway`
+  - 只负责入口协议、认证、限流、幂等和路由，不拥有业务真相。
+- `sdkworkfs-control`
+  - 负责中心元数据、策略、审批、发布状态机和目标态，是平台业务真相拥有者。
+- `sdkworkfs-job-runner`
+  - 只负责长任务执行与重试，拥有执行尝试和 worker lease，不直接拥有发布真相。
+- `sdkworkfs-git-server`
+  - 负责 Git 协议、受管裸仓库、push 收据和 LFS 鉴权，不直接写控制面业务表。
+- `sdkworkfsd`
+  - 负责节点本地缓存、物化目录、`current/previous` 切换指针、写回队列和本地恢复。
+
+同时明确三类内容分仓治理：
+
+- Git 对象存放在受管 bare repo 中。
+- Git LFS 大对象存放在 Git LFS 专用对象前缀中。
+- Release 运行时对象存放在 Release 对象存储前缀中。
+
+三者可以共用底层 S3 服务，但逻辑命名空间、权限和生命周期策略必须隔离。
+
+## API 分层
+
+外部与内部接口统一按职责拆分：
+
+- `/admin/v1/*`
+  - 管理 API，面向运维、控制台、CI 管理端
+- `/runtime/v1/*`
+  - 运行时 API，面向上传、Manifest、Release 消费、运行时查询
+- `/node/v1/*`
+  - 节点 API，面向 `sdkworkfsd`
+- `/git/*`
+  - Git Smart HTTP
+- `SSH`
+  - Git over SSH
+- `/internal/v1/*`
+  - 服务间内部接口
+
+详细接口规划见：
+
+- [`/docs/架构/15-接口与事件模型.md`](docs/架构/15-接口与事件模型.md)
+- [`/docs/架构/29-控制面Gateway API详细设计.md`](docs/架构/29-控制面Gateway API详细设计.md)
+- [`/docs/架构/78-Rust版Gateway与管理-非管理API规划.md`](docs/架构/78-Rust版Gateway与管理-非管理API规划.md)
+
+## 技术底座
+
+当前推荐的 Rust 技术基线：
+
+- HTTP / 网关：`axum` + `tower-http`
+- 异步运行时：`tokio`
+- OpenAPI：`utoipa`
+- 数据库：`sqlx`
+- 内部 RPC：`tonic`
+- 事件总线：`async-nats`
+- Git：`gitoxide` 生态，以 `gix` 为应用主入口
+- Git SSH：`russh`
+- 对象存储：`aws-sdk-s3`
+- 缓存：`moka`
+- 挂载：Linux 优先 `fuser`，其余平台走 Rust 适配层
+- 可观测性：`tracing` + `opentelemetry`
+
+详细说明见：
+
+- [`/docs/架构/75-Rust技术底座与开源集成策略.md`](docs/架构/75-Rust技术底座与开源集成策略.md)
+- [`/docs/架构/76-Rust版Git-Server完整能力设计.md`](docs/架构/76-Rust版Git-Server完整能力设计.md)
+- [`/docs/架构/77-Rust版模块与依赖选型矩阵.md`](docs/架构/77-Rust版模块与依赖选型矩阵.md)
+
+## 文档阅读顺序
+
+建议按以下顺序阅读架构文档：
+
+1. [`/docs/架构/00-总体规划.md`](docs/架构/00-总体规划.md)
+2. [`/docs/架构/02-技术架构总览.md`](docs/架构/02-技术架构总览.md)
+3. [`/docs/架构/33-模块拆分与代码落地映射.md`](docs/架构/33-模块拆分与代码落地映射.md)
+4. [`/docs/架构/79-Rust版服务边界与数据归属规范.md`](docs/架构/79-Rust版服务边界与数据归属规范.md)
+5. [`/docs/架构/80-Rust版限界上下文与crate细化规范.md`](docs/架构/80-Rust版限界上下文与crate细化规范.md)
+6. [`/docs/架构/81-Rust版代码布局与端口适配器规范.md`](docs/架构/81-Rust版代码布局与端口适配器规范.md)
+7. [`/docs/架构/75-Rust技术底座与开源集成策略.md`](docs/架构/75-Rust技术底座与开源集成策略.md)
+8. [`/docs/架构/76-Rust版Git-Server完整能力设计.md`](docs/架构/76-Rust版Git-Server完整能力设计.md)
+9. [`/docs/架构/15-接口与事件模型.md`](docs/架构/15-接口与事件模型.md)
+10. [`/docs/架构/29-控制面Gateway API详细设计.md`](docs/架构/29-控制面Gateway API详细设计.md)
+11. [`/docs/架构/38-节点守护进程与挂载同步详细设计.md`](docs/架构/38-节点守护进程与挂载同步详细设计.md)
+
+## 当前文档状态
+
+当前文档已统一收敛到全 Rust 基线。后续实现、分阶段计划和代码落地都应以现有 Rust 服务边界、crate 拆分和 API 设计为准。

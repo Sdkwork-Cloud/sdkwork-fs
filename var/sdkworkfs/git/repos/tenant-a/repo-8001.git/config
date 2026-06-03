@@ -1,0 +1,12 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = true
+	logallrefupdates = false
+[remote "origin"]
+	url = file:///C:/Users/admin/AppData/Local/Temp/sdkworkfs-audit-git-fixture-2442035952106194593/
+	fetch = +refs/heads/*:refs/heads/*
+	fetch = +refs/tags/*:refs/tags/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main

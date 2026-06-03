@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: sdkworkfs-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sdkworkfs}
+      POSTGRES_USER: ${POSTGRES_USER:-sdkworkfs}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-sdkworkfs}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-sdkworkfs} -d ${POSTGRES_DB:-sdkworkfs}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: sdkworkfs-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-sdkworkfs}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-sdkworkfs123}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+
+  nats:
+    image: nats:2.10-alpine
+    container_name: sdkworkfs-nats
+    command: ["-js", "-sd", "/data"]
+    ports:
+      - "${NATS_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - nats-data:/data
+
+  sdkworkfs-control-plane:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sdkworkfs-control-plane
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_started
+      nats:
+        condition: service_started
+    environment:
+      SDKWORK_FS_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-sdkworkfs}
+      SDKWORK_FS_DATASOURCE_USERNAME: ${POSTGRES_USER:-sdkworkfs}
+      SDKWORK_FS_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-sdkworkfs}
+      SDKWORK_FS_GIT_MANAGED_ROOT_DIR: ${SDKWORK_FS_GIT_MANAGED_ROOT_DIR:-/var/lib/sdkworkfs/git/repos}
+      SDKWORK_FS_BUILD_WORKSPACE_ROOT_DIR: ${SDKWORK_FS_BUILD_WORKSPACE_ROOT_DIR:-/var/lib/sdkworkfs/build/workspaces}
+      SDKWORK_FS_BUILD_COMMAND_PATH_PREPEND: ${SDKWORK_FS_BUILD_COMMAND_PATH_PREPEND:-}
+      SDKWORK_FS_BUILD_NODE_ENABLED: ${SDKWORK_FS_BUILD_NODE_ENABLED:-false}
+      SDKWORK_FS_BUILD_NODE_INSTALL_TIMEOUT_SECONDS: ${SDKWORK_FS_BUILD_NODE_INSTALL_TIMEOUT_SECONDS:-300}
+      SDKWORK_FS_BUILD_NODE_BUILD_TIMEOUT_SECONDS: ${SDKWORK_FS_BUILD_NODE_BUILD_TIMEOUT_SECONDS:-300}
+      SDKWORK_FS_BUILD_JAVA_ENABLED: ${SDKWORK_FS_BUILD_JAVA_ENABLED:-false}
+      SDKWORK_FS_BUILD_JAVA_MAVEN_TIMEOUT_SECONDS: ${SDKWORK_FS_BUILD_JAVA_MAVEN_TIMEOUT_SECONDS:-600}
+      SDKWORK_FS_BUILD_JAVA_GRADLE_TIMEOUT_SECONDS: ${SDKWORK_FS_BUILD_JAVA_GRADLE_TIMEOUT_SECONDS:-600}
+      SDKWORK_FS_BUILD_PYTHON_ENABLED: ${SDKWORK_FS_BUILD_PYTHON_ENABLED:-false}
+      SDKWORK_FS_BUILD_PYTHON_BUILD_TIMEOUT_SECONDS: ${SDKWORK_FS_BUILD_PYTHON_BUILD_TIMEOUT_SECONDS:-600}
+      SDKWORK_FS_S3_ENDPOINT: http://minio:9000
+      SDKWORK_FS_S3_REGION: ${SDKWORK_FS_S3_REGION:-ap-east-1}
+      SDKWORK_FS_S3_BUCKET: ${SDKWORK_FS_S3_BUCKET:-sdkworkfs}
+      SDKWORK_FS_S3_ACCESS_KEY: ${MINIO_ROOT_USER:-sdkworkfs}
+      SDKWORK_FS_S3_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-sdkworkfs123}
+      SDKWORK_FS_S3_PRESIGN_EXPIRY_SECONDS: ${SDKWORK_FS_S3_PRESIGN_EXPIRY_SECONDS:-900}
+      SDKWORK_FS_S3_AUTO_CREATE_BUCKET: ${SDKWORK_FS_S3_AUTO_CREATE_BUCKET:-true}
+      SDKWORK_FS_S3_FAIL_FAST_ON_MISSING_BUCKET: ${SDKWORK_FS_S3_FAIL_FAST_ON_MISSING_BUCKET:-true}
+      SDKWORK_FS_CACHE_OBJECT_ROOT_DIR: ${SDKWORK_FS_CACHE_OBJECT_ROOT_DIR:-/var/lib/sdkworkfs/cache/objects}
+      SDKWORK_FS_CACHE_MATERIALIZED_ROOT_DIR: ${SDKWORK_FS_CACHE_MATERIALIZED_ROOT_DIR:-/var/lib/sdkworkfs/materialized}
+      SDKWORK_FS_NODE_METADATA_ROOT_DIR: ${SDKWORK_FS_NODE_METADATA_ROOT_DIR:-/var/lib/sdkworkfs/node/metadata}
+    ports:
+      - "${APP_PORT:-18080}:8080"
+    volumes:
+      - sdkworkfs-node-data:/var/lib/sdkworkfs
+
+volumes:
+  postgres-data:
+  minio-data:
+  nats-data:
+  sdkworkfs-node-data:

@@ -1,0 +1,9 @@
+.git
+.gitignore
+target
+docs
+apps
+.env
+.env.*
+README.md
+AGENTS.md

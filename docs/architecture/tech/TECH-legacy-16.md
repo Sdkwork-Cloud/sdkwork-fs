@@ -1,0 +1,128 @@
+> Migrated from `docs/架构/16-多语言项目接入规范.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 多语言项目接入规范
+
+## 1. 目标
+
+统一定义 `sdkworkfs` 对 React、Node.js、Java、Python 等项目的识别规则、默认排除规则、构建产物规则和发布入口，减少项目接入时的歧义。
+
+## 2. 识别规则
+
+| 类型 | 识别文件 |
+| --- | --- |
+| Node.js / React | `package.json` |
+| Java Maven | `pom.xml` |
+| Java Gradle | `build.gradle`、`settings.gradle` |
+| Python | `pyproject.toml`、`setup.py`、`requirements.txt` |
+| 静态站点 | `index.html` |
+
+## 3. 默认上传模式
+
+### 3.1 Workspace Upload
+
+用途：
+
+- 开发同步
+- 预览环境
+- 主干连续发布
+
+特点：
+
+- 上传源码或工作区内容
+- 自动排除大依赖目录和本地缓存目录
+
+### 3.2 Release Publish
+
+用途：
+
+- 测试、预发、生产
+
+特点：
+
+- 上传构建产物或可直接运行目录
+- 生成不可变 Release
+
+## 4. 默认排除规则
+
+### 4.1 Node.js / React
+
+- `node_modules/`
+- `.git/`
+- `.turbo/`
+- `.cache/`
+- `coverage/`
+
+### 4.2 Java
+
+- `target/`
+- `build/`
+- `.gradle/`
+- `.idea/`
+- `.git/`
+
+### 4.3 Python
+
+- `.venv/`
+- `venv/`
+- `__pycache__/`
+- `.pytest_cache/`
+- `dist/`
+- `build/`
+- `.git/`
+
+## 5. 默认发布产物
+
+| 类型 | 默认产物 |
+| --- | --- |
+| React / Node.js | `dist/`、`build/`、`.next/standalone` |
+| Java Maven | `target/*.jar`、`target/*.war` |
+| Java Gradle | `build/libs/*.jar`、`build/libs/*.war` |
+| Python | `dist/*.whl`、`dist/*.tar.gz` 或受控源码目录 |
+| 静态站点 | 静态目录整体 |
+
+## 6. 运行时目录要求
+
+- React / 静态站点应优先读取已物化静态目录
+- Java 应优先读取物化后的 Jar/War 与配置目录
+- Python 应优先读取物化后的 wheel 或应用目录
+- 所有语言的运行时都不应直接依赖 Git 工作目录作为正式运行目录
+
+## 7. 默认发布建议
+
+- `main` 连续发布到 `dev`
+- `tag/release` 发布到 `prod`
+- 产物优先于源码直接运行
+
+## 8. 特殊要求
+
+- 大型前端产物需支持静态资源预热
+- Java 包需保留启动配置与日志目录约定
+- Python 包需支持虚拟环境目录排除和入口脚本识别
+- 多模块仓库需支持子项目级规则覆盖
+
+## 9. 正式要求
+
+- 任何多语言项目接入都必须有显式的过滤规则
+- 任何正式发布都必须声明运行目录来源
+- 任何构建产物缺失都必须在发布前失败，而不是在节点运行时才暴露
+
+## 10. 受控构建与产物选择规则
+
+- Git `build-release` 必须支持 `repository.source.buildOutput` 或应用级覆盖，例如 `dist/`、`target/*.jar`、`deployment/*.jar`
+- 未配置 `buildOutput` 时，按 `application.runtimeType` 选择默认候选产物：
+  - `NODEJS` / `REACT`：`dist/`、`build/`、`.next/standalone`
+  - `JAVA`：`target/*.jar`、`target/*.war`、`build/libs/*.jar`、`build/libs/*.war`
+  - `PYTHON`：`dist/*.whl`、`dist/*.tar.gz`
+- Node.js / React 的受控构建由 `sdkworkfs-build-nodejs` 承载，只允许固定模板：
+  - `pnpm-lock.yaml` -> `pnpm install --frozen-lockfile` + `pnpm build`
+  - `package-lock.json` -> `npm ci` + `npm run build`
+  - `yarn.lock` -> `yarn install --frozen-lockfile` + `yarn build`
+- Java 的受控构建由 `sdkworkfs-build-java` 承载，只允许固定模板：
+  - Maven -> `mvn -B -DskipTests package`
+  - Gradle -> `gradle --no-daemon assemble -x test`
+- Python 的受控构建由 `sdkworkfs-build-python` 承载，只允许固定模板：
+  - `python -m build --wheel --sdist`
+- 受控构建成功后，必须先应用 `buildOutput`，再应用运行时默认产物规则；若没有命中可发布产物，则直接失败
+- 若环境策略允许“源码直出”，则必须显式记录为源码快照发布，而不是隐式回退
+

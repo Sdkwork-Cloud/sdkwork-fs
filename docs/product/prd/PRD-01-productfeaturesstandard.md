@@ -1,0 +1,98 @@
+> Migrated from `docs/架构/01-产品功能标准.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 产品功能标准
+
+## 1. 产品定位
+
+`sdkworkfs` 是一个面向多语言项目、多环境部署和多节点运行的统一发布平台。它同时提供内容入口、版本治理、缓存管理、挂载访问、本地同步、回源加载、快速切换和 Git 托管能力。
+
+## 2. 支持的项目类型
+
+| 类型 | 识别依据 | 典型上传内容 | 典型运行内容 |
+| --- | --- | --- | --- |
+| React / Node.js | `package.json` | 源码目录或构建产物 | `dist`、`build`、`.next/standalone` |
+| Java Maven | `pom.xml` | 源码目录或 Jar/War | `target/*.jar` |
+| Java Gradle | `build.gradle` | 源码目录或 Jar/War | `build/libs/*.jar` |
+| Python | `pyproject.toml`、`setup.py`、`requirements.txt` | 源码目录、wheel、tar.gz | `dist/*.whl`、应用目录 |
+| 静态站点 | `index.html`、静态资源目录 | 静态目录 | 同步后的本地目录 |
+| 二进制分发 | 自定义包描述 | 压缩包、二进制文件 | 解包后的本地目录 |
+
+## 3. 核心功能
+
+### 3.1 内容入口
+
+- Git 仓库导入
+- HTTP/SSH Git push
+- 上游 Git 拉取
+- S3 对象导入
+- 本地目录上传
+- 构建产物发布
+
+### 3.2 版本治理
+
+- 不可变 Release
+- Manifest 生成
+- 版本切换
+- 版本回滚
+- 保留与清理
+- 环境通道管理
+
+### 3.3 消费模式
+
+- `mount mode`：以操作系统挂载形态提供访问
+- `sync mode`：同步到本地真实目录供应用直接访问
+- `hybrid mode`：挂载与同步并存，按路径和用途分配
+
+### 3.4 缓存与运行
+
+- 内存元数据缓存
+- 内存热点内容缓存
+- 本地对象缓存
+- 本地物化版本缓存
+- 写回与冲突缓存
+- 预热、GC 和配额控制
+
+### 3.5 集群与同步
+
+- 单主多节点分发
+- 多主可选
+- Git 镜像和灾备
+- Git 双向同步
+- 节点版本传播
+- 对象缓存预热
+
+## 4. 环境与通道模型
+
+| 通道 | 默认来源 | 目标 |
+| --- | --- | --- |
+| `dev` | `main` | 开发、联调、连续预览 |
+| `test` | `main` 或指定测试分支 | 测试与集成 |
+| `staging` | tag 或受控分支 | 预生产验证 |
+| `prod` | tag / release | 正式生产 |
+
+## 5. Git 工作流标准
+
+- 默认采用 trunk-based，`main` 是主干开发源。
+- 必须支持 branch-based 和 mixed 模式。
+- Git 工作流必须可配置，不允许平台强绑单一流程。
+
+## 6. 用户可见能力
+
+- `sdkworkfs upload`
+- `sdkworkfs publish`
+- `sdkworkfs mount`
+- `sdkworkfs sync`
+- `sdkworkfs switch`
+- `sdkworkfs rollback`
+- `sdkworkfs status`
+- `sdkworkfs logs`
+- `sdkworkfs gc`
+
+## 7. 产品级要求
+
+- 任何正式发布必须可追溯到 Source Version 和 ReleaseId。
+- 任何节点必须能查询当前运行版本与前一个回滚版本。
+- 任何缓存行为必须可观测、可限制、可清理。
+- 任何 Git 镜像和双向同步关系必须可配置、可审计、可禁用。
+

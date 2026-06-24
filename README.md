@@ -147,3 +147,10 @@ SdkworkFS 的目标能力包括：
 ## 当前文档状态
 
 当前文档已统一收敛到全 Rust 基线。后续实现、分阶段计划和代码落地都应以现有 Rust 服务边界、crate 拆分和 API 设计为准。
+
+## Documentation Canon
+
+- [docs/README.md](docs/README.md)
+- [docs/product/prd/PRD.md](docs/product/prd/PRD.md)
+- [docs/architecture/tech/TECH_ARCHITECTURE.md](docs/architecture/tech/TECH_ARCHITECTURE.md)
+

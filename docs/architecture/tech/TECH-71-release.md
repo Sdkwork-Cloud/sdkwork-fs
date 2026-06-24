@@ -1,0 +1,57 @@
+> Migrated from `docs/架构/71-资源完整性与自动发布标识补充规范.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 71-资源完整性与自动发布标识补充规范
+
+## 目标
+
+补齐控制面资源写入链路中的引用完整性和多租户边界约束，并统一自动候选发布 `releaseId` 的生成规则，避免长 ID 场景下的版本碰撞。
+
+## 资源引用完整性
+
+### Application -> Repository
+
+- `POST /api/v1/applications` 必须先校验 `repositoryId` 存在。
+- 请求中的 `tenantId` 必须与目标仓库的 `tenantId` 一致。
+- 不存在返回 `404 NOT_FOUND`，跨租户引用返回 `409 CONFLICT`。
+
+### Release -> Application
+
+- `POST /api/v1/releases` 必须先校验 `appId` 存在。
+- 请求中的 `tenantId` 必须与目标应用的 `tenantId` 一致。
+- 不存在返回 `404 NOT_FOUND`，跨租户引用返回 `409 CONFLICT`。
+
+### 设计原则
+
+- 首期实现优先在服务层做强校验，确保行为立即收敛。
+- 数据库外键仍建议作为后续增强项，但要先完成历史脏数据扫描与迁移窗口设计。
+
+## 自动候选发布 releaseId 规则
+
+### 常规规则
+
+当 `autoReleaseEnabled=true` 且仓库 sync 成功时，控制面按如下规则生成候选发布 ID：
+
+`auto-<appId>-<environment>-<commit12>`
+
+该规则在长度不超过 64 字符时直接使用，便于审计检索和人工识别。
+
+### 超长规则
+
+若常规格式超过 64 字符，则自动切换为：
+
+`auto-<appPrefix>-<envPrefix>-<commit12>-<hash8>`
+
+规则说明：
+
+- `appPrefix` 为截断后的应用前缀
+- `envPrefix` 为截断后的环境前缀
+- `hash8` 由 `appId|environment|commit` 计算得到
+- 该格式仍然是确定性的，同一应用、同一环境、同一 commit 必然得到同一个 `releaseId`
+- 不同 commit 在长 ID 场景下也能保持可区分，避免重复 sync 被误判为同一个候选版本
+
+## 幂等语义
+
+- 同一 `releaseId` 已存在 Release，或已有该 `releaseId` 的 `BUILD_RELEASE` 处于 `PENDING` / `RUNNING`，则不重复排队。
+- 单实例部署至少要保证最小幂等；多实例场景必须进一步补齐全局幂等与租约协调。
+

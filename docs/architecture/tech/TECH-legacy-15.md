@@ -1,0 +1,344 @@
+> Migrated from `docs/架构/15-接口与事件模型.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 接口与事件模型
+
+## 1. 目标
+
+统一定义 `sdkworkfs` 的外部 API、内部接口、命令总线和事件模型，确保：
+
+- 管理 API、运行时 API、节点 API、Git 协议入口职责明确。
+- 同步查询、异步命令和事实事件边界清晰。
+- 事件至少一次投递时仍可安全重放。
+- 后续 OpenAPI、Protobuf、SDK 生成有统一契约边界。
+
+## 2. 接口分层
+
+### 2.1 管理 API
+
+前缀：`/admin/v1/*`
+
+职责：
+
+- 租户、仓库、应用、策略、节点、发布管理
+- 审批、配额、分支保护、镜像策略、回滚控制
+- 运维查询、审计查询、异步任务管理
+
+### 2.2 运行时 API
+
+前缀：`/runtime/v1/*`
+
+职责：
+
+- 上传初始化与完成
+- Manifest 注册与查询
+- Release 查询、物化计划查询
+- 下载票据、版本解析、运行时只读查询
+
+### 2.3 节点 API
+
+前缀：`/node/v1/*`
+
+职责：
+
+- 节点注册、心跳、租约续租
+- 任务拉取、任务确认、进度上报、完成上报
+- 缓存、物化、切换、故障统计上报
+
+### 2.4 Git 协议入口
+
+前缀：`/git/*` 与 SSH 端口
+
+职责：
+
+- Git Smart HTTP
+- Git over SSH
+- `upload-pack` / `receive-pack`
+- Git LFS batch 协议
+
+### 2.5 内部接口
+
+前缀：`/internal/v1/*` 或内部 gRPC
+
+职责：
+
+- gateway 与 control 之间的内部调用
+- git-server 获取仓库配置快照与上报 push 收据
+- job-runner 获取任务、上报执行尝试结果
+- daemon 拉取计划、上报节点状态
+
+## 3. 推荐协议
+
+| 层级 | 推荐协议 |
+| --- | --- |
+| 管理 API | HTTPS REST + JSON |
+| 运行时 API | HTTPS REST + JSON |
+| 节点 API | gRPC 为主，必要时补 REST |
+| 服务间内部调用 | gRPC |
+| 命令与事件总线 | NATS JetStream |
+| Git 协议 | Smart HTTP + SSH |
+
+## 4. 通用约定
+
+### 4.1 头部
+
+- `Authorization`
+- `X-Request-Id`
+- `Idempotency-Key`
+- `If-Match`
+- `X-Operator`
+- `X-Tenant-Id`
+
+### 4.2 同步响应
+
+```json
+{
+  "requestId": "req-001",
+  "code": "OK",
+  "message": "success",
+  "data": {}
+}
+```
+
+### 4.3 异步响应
+
+```json
+{
+  "requestId": "req-002",
+  "code": "ACCEPTED",
+  "message": "accepted",
+  "data": {
+    "operationId": "op-001",
+    "status": "PENDING"
+  }
+}
+```
+
+### 4.4 列表响应
+
+```json
+{
+  "requestId": "req-003",
+  "code": "OK",
+  "data": {
+    "items": [],
+    "page": 1,
+    "pageSize": 20,
+    "total": 0
+  }
+}
+```
+
+## 5. 命令与事件边界
+
+### 5.1 命令
+
+命令表示“期望某个拥有者执行的动作”，具备以下特征：
+
+- 有明确目标拥有者
+- 必须带 `commandId`
+- 必须支持幂等去重
+- 可失败、可重试、可超时
+
+推荐主题：
+
+- `operation.dispatch`
+- `git.push.ingest`
+- `repository.mirror.dispatch`
+- `node.plan.dispatch`
+
+### 5.2 事件
+
+事件表示“某个事实已经发生”，具备以下特征：
+
+- 不要求单一消费者
+- 至少一次投递
+- 允许重放
+- 消费者必须通过 `eventId` 去重
+
+推荐主题：
+
+- `git.push.accepted`
+- `git.push.rejected`
+- `repository.resolved-version.updated`
+- `release.candidate.created`
+- `release.published`
+- `release.activation.completed`
+- `node.materialize.completed`
+- `node.switch.completed`
+- `cache.gc.completed`
+
+## 6. 幂等与重放规则
+
+- 所有管理 API 写操作都必须支持 `Idempotency-Key`。
+- 所有异步命令都必须带 `commandId` 与 `dedupeKey`。
+- 所有事件都必须带 `eventId`、`causationId`、`correlationId`。
+- 事件总线采用至少一次投递，消费者必须落 `inbox` 或等价去重记录。
+- `git.push.ingest` 必须按 `repositoryId + pushReceiptId` 幂等。
+- 节点任务必须按 `taskId + leaseEpoch` 幂等。
+
+## 7. 资源 API 集合
+
+### 7.1 管理 API
+
+- `/admin/v1/tenants`
+- `/admin/v1/repositories`
+- `/admin/v1/applications`
+- `/admin/v1/environments`
+- `/admin/v1/releases`
+- `/admin/v1/policies`
+- `/admin/v1/nodes`
+- `/admin/v1/operations`
+- `/admin/v1/audit-logs`
+- `/admin/v1/quotas`
+
+### 7.2 运行时 API
+
+- `/runtime/v1/uploads`
+- `/runtime/v1/manifests`
+- `/runtime/v1/releases`
+- `/runtime/v1/releases/{releaseId}/objects`
+- `/runtime/v1/releases/{releaseId}/materialization-plan`
+- `/runtime/v1/download-tickets`
+- `/runtime/v1/repositories/{repositoryId}/resolved-version`
+
+### 7.3 节点 API
+
+- `/node/v1/register`
+- `/node/v1/heartbeat`
+- `/node/v1/tasks:pull`
+- `/node/v1/tasks/{taskId}:ack`
+- `/node/v1/tasks/{taskId}:progress`
+- `/node/v1/tasks/{taskId}:complete`
+- `/node/v1/cache-report`
+- `/node/v1/switch-report`
+
+## 8. Git 与资源 API 的边界
+
+Git 协议入口只处理：
+
+- `clone`
+- `fetch`
+- `push`
+- `upload-pack`
+- `receive-pack`
+- `lfs`
+
+它不承载：
+
+- 发布审批
+- Release 查询
+- 节点编排
+- 运维查询
+- 审计检索
+
+这些都属于管理 API、运行时 API 或内部接口。
+
+## 9. 异步操作模型
+
+任何长任务都必须收敛到 `Operation` 聚合：
+
+- 仓库同步
+- 仓库镜像
+- 双向同步
+- 构建
+- 发布
+- 激活
+- 回滚
+- 节点预热
+- 物化
+- 垃圾回收
+
+`Operation` 至少包含：
+
+- `operationId`
+- `type`
+- `status`
+- `targetResourceType`
+- `targetResourceId`
+- `summary`
+- `createdAt`
+- `updatedAt`
+
+`OperationAttempt` 至少包含：
+
+- `attemptId`
+- `operationId`
+- `workerId`
+- `leaseEpoch`
+- `status`
+- `retryCount`
+- `startedAt`
+- `finishedAt`
+
+## 10. 事件载荷最低要求
+
+每个事件至少包含：
+
+- `eventId`
+- `eventType`
+- `requestId`
+- `tenantId`
+- `resourceType`
+- `resourceId`
+- `timestamp`
+- `partitionKey`
+- `sequence`
+- `causationId`
+- `correlationId`
+- `replayable`
+
+## 11. 内部 gRPC 服务归属
+
+| 服务 | 拥有者 | 说明 |
+| --- | --- | --- |
+| `RepositoryConfigQueryService` | `sdkworkfs-control` | git-server 拉取仓库策略、主干配置、放置归属 |
+| `PushReceiptIngestService` | `sdkworkfs-control` | git-server 上报 push 收据 |
+| `OperationReportService` | `sdkworkfs-control` | job-runner 回报 attempt 结果 |
+| `NodePlanService` | `sdkworkfs-control` | daemon 拉取计划、确认租约 |
+| `ObjectTicketService` | `sdkworkfs-control` / `sdkworkfs-object` | 生成下载 ticket、预签名 |
+
+## 12. 版本化与变更规则
+
+- 外部 REST API 必须带版本前缀，例如 `/admin/v1`、`/runtime/v1`。
+- `node/v1` 使用 Protobuf 定义，并通过显式版本门禁控制升级顺序。
+- Git 协议本身不走 OpenAPI，也不进入 DTO/SDK 生成范围。
+- 破坏性变更必须通过新版本前缀或同步升级计划发布，禁止静默改语义。
+- SDK 只从 `/admin/v1` 与 `/runtime/v1` 生成。
+
+## 13. 错误模型
+
+推荐错误码：
+
+- `INVALID_ARGUMENT`
+- `UNAUTHENTICATED`
+- `ACCESS_DENIED`
+- `POLICY_DENIED`
+- `RESOURCE_NOT_FOUND`
+- `CONFLICT`
+- `HASH_MISMATCH`
+- `OBJECT_MISSING`
+- `UPSTREAM_UNAVAILABLE`
+- `NODE_EXECUTION_FAILED`
+- `LEASE_NOT_HELD`
+
+推荐 HTTP 状态：
+
+- `400`
+- `401`
+- `403`
+- `404`
+- `409`
+- `422`
+- `429`
+- `500`
+- `503`
+
+## 14. 正式要求
+
+- 管理 API、运行时 API、节点 API、Git 协议入口必须分域。
+- 所有异步任务必须有 `Operation`，所有执行尝试必须有 `OperationAttempt`。
+- 所有关键状态变化必须发事件，并支持幂等重放。
+- 命令和事件必须分主题治理，不能混用。
+- OpenAPI、gRPC、Git 协议必须分别演进，不能互相污染。
+

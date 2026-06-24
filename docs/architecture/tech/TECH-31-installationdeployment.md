@@ -1,0 +1,203 @@
+> Migrated from `docs/架构/31-安装部署与环境准备规范.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 安装部署与环境准备规范
+
+## 1. 目标
+
+统一定义 `sdkworkfs` 的环境准备、依赖组件、节点要求、启动顺序、安装步骤和验收检查，确保平台按纯 Rust 基线完成部署。
+
+节点守护进程模块边界和挂载 / 同步实现细节见 `38-节点守护进程与挂载同步详细设计.md`。systemd、Docker、Compose、Kubernetes 的最小部署清单见 `41-systemd-Docker-Kubernetes部署清单.md`。
+
+## 2. 推荐部署模式
+
+### 2.1 本地开发模式
+
+适用：
+
+- 单机验证
+- 接口联调
+- CLI / 守护进程调试
+
+特点：
+
+- 单节点
+- 单 PostgreSQL
+- 单 NATS
+- 单 S3 API 标准对象存储
+
+### 2.2 标准生产模式
+
+适用：
+
+- 默认生产上线
+- 单区域单主架构
+
+特点：
+
+- `sdkworkfs-gateway`
+- `sdkworkfs-control`
+- `sdkworkfs-job-runner`
+- `sdkworkfs-git-server`
+- 多个 `sdkworkfsd` Worker / Edge 节点
+- 独立 PostgreSQL、NATS、S3
+
+### 2.3 双区域容灾模式
+
+适用：
+
+- 高可用生产
+- 异地容灾
+
+特点：
+
+- 主区与备区分离
+- Git 镜像、对象复制、元数据备份独立治理
+- 节点分区可独立维持已物化版本服务
+
+## 3. 依赖组件基线
+
+| 组件 | 推荐基线 |
+| --- | --- |
+| Gateway | `sdkworkfs-gateway` Rust 二进制 |
+| Control Plane | `sdkworkfs-control` Rust 二进制 |
+| Job Runner | `sdkworkfs-job-runner` Rust 二进制 |
+| Git Server | `sdkworkfs-git-server` Rust 二进制 |
+| PostgreSQL | `15+` |
+| NATS | `2.x` |
+| S3 存储 | 遵循 S3 API 标准的对象存储 |
+| 节点守护进程 | `sdkworkfsd` |
+| CLI | `sdkworkfs` |
+| Linux 挂载 | FUSE |
+| macOS 挂载 | macFUSE |
+| Windows 挂载 | 目录同步模式优先，挂载能力按阶段落地 |
+
+## 4. 节点资源建议
+
+### 4.1 中心服务节点
+
+- CPU：`4C+`
+- 内存：`8GB+`
+- 系统盘：`100GB+`
+
+### 4.2 Worker / Edge 节点
+
+- CPU：`4C+`
+- 内存：`8GB-32GB`
+- 对象缓存磁盘：按应用规模预留，建议 `200GB+`
+- 物化目录磁盘：至少满足 `current + previous stable + prefetch target`
+
+## 5. 目录与挂载准备
+
+建议目录：
+
+```text
+/opt/sdkworkfs/
+/var/lib/sdkworkfs/
+/var/cache/sdkworkfs/
+/var/log/sdkworkfs/
+```
+
+Windows 建议：
+
+```text
+C:\sdkworkfs\
+C:\sdkworkfs\data\
+C:\sdkworkfs\cache\
+C:\sdkworkfs\logs\
+```
+
+## 6. 启动顺序
+
+推荐启动顺序：
+
+1. PostgreSQL
+2. S3 API 标准对象存储
+3. NATS
+4. `sdkworkfs-control`
+5. `sdkworkfs-job-runner`
+6. `sdkworkfs-git-server`
+7. `sdkworkfs-gateway`
+8. Worker / Edge `sdkworkfsd`
+9. `sdkworkfs` CLI 验证与健康检查
+
+不允许在中心组件未完成初始化时直接让节点进入正式激活状态。
+
+## 7. 初始安装步骤
+
+### 7.1 基础准备
+
+- 创建 PostgreSQL 数据库与账号
+- 创建对象存储 bucket
+- 创建 NATS 账号或认证配置
+- 准备 JWT / Service Token / 节点凭据
+- 准备 Git SSH Host Key 与 LFS 凭据
+
+### 7.2 中心服务初始化
+
+- 加载数据库 schema
+- 初始化平台管理员
+- 初始化默认租户、默认环境策略、默认配置模板
+- 验证 `/healthz`、`/readyz`、`/metrics`
+
+### 7.3 节点初始化
+
+- 创建本地目录
+- 下发节点配置
+- 启动 `sdkworkfsd`
+- 执行节点注册
+- 验证心跳上报成功
+
+## 8. 容器与 Kubernetes 建议
+
+### 8.1 容器化建议
+
+- `gateway`、`control`、`job-runner`、`git-server` 建议容器化
+- 节点守护进程按场景可容器化，也可直接以系统服务运行
+- 挂载场景下，节点容器需要额外挂载权限与宿主机卷
+
+### 8.2 Kubernetes 建议
+
+- `gateway`、`control`、`job-runner`、`git-server` 使用 `Deployment`
+- NATS / PostgreSQL / MinIO 可使用托管服务或 `StatefulSet`
+- `sdkworkfsd` 建议使用 `DaemonSet`
+- 挂载模式需显式评估宿主机权限、FUSE 权限与 Windows 节点同步路径策略
+
+## 9. 健康检查与验收
+
+部署完成后至少验证：
+
+1. `control`、`gateway`、`git-server` 健康检查通过
+2. 节点注册成功
+3. 节点心跳可见
+4. 创建 Release 成功
+5. 节点预热成功
+6. 版本切换成功
+7. 回滚链路可用
+8. 审计日志可查询
+
+## 10. 升级与回退
+
+- 升级前必须备份数据库、关键配置与对象存储索引
+- 控制面升级与节点升级应支持分批执行
+- 破坏性协议或 schema 调整必须通过新版本前缀、显式迁移脚本和回退预案落地
+- 新版本异常时必须支持快速回退到上一稳定版本
+
+## 11. 交付物要求
+
+最小部署交付物应包括：
+
+- `Dockerfile`
+- `compose.yaml`
+- systemd unit 文件
+- Kubernetes manifest 或 Helm chart
+- `.env.example` 或等价配置模板
+
+本地开发建议通过 Compose 拉起 PostgreSQL、NATS 与 MinIO；生产环境必须替换默认凭据，并固定镜像版本、存储策略与网络策略。
+
+## 12. 正式要求
+
+- 安装部署必须包含依赖、目录、权限、网络和启动顺序标准
+- 节点正式接流前必须完成注册、心跳和基础预热验证
+- 部署验收必须覆盖发布、切换、回滚和审计链路
+

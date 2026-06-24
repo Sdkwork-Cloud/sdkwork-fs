@@ -1,0 +1,60 @@
+> Migrated from `docs/架构/13-路线图与实施顺序.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 路线图与实施顺序
+
+## 1. 实施原则
+
+- 先统一 `Release + Manifest` 模型，再扩展 Git、S3、Upload 等入口。
+- 先打通同步、缓存、物化和切换的最小闭环，再做挂载与高级集群能力。
+- 先落 Rust workspace、中心元数据和节点本地闭环，再演进到分布式 worker、事件总线和多主同步。
+
+## 2. Phase 1：控制面与发布基础
+
+- 建立 Rust workspace 与基础 crate
+- Repository / Application / Manifest / Release / Operation / Audit 模型
+- Upload 与对象存储登记
+- Release `verify -> publish -> activate -> rollback`
+- 管理 API、运行时 API、节点 API 契约冻结
+
+## 3. Phase 2：缓存、物化与运行时消费
+
+- `sdkworkfsd` 节点本地 SQLite、L2 对象缓存、L3 物化目录
+- L2 对象磁盘缓存
+- L3 本地物化目录
+- `current/previous` 原子切换
+- 压缩感知物化与回源
+- 多语言项目运行目录标准化
+
+## 4. Phase 3：Git 来源与发布构建
+
+- Git 来源配置、同步操作、审计轨迹
+- Git `branch/tag/commit` 解析与 resolved revision 投影
+- 基于 Git revision 的 Release Builder
+- 受管 bare repo、内容抓取、候选 Release 构建
+- Git Gateway、push 触发、分支保护、镜像同步
+
+## 5. Phase 4：挂载视图与高级缓存
+
+- FUSE / macFUSE / WinFSP
+- L1 内存热点缓存
+- 分块读取、大文件按需加载
+- 写回缓冲与冲突治理
+
+## 6. Phase 5：分布式集群与双向同步
+
+- 多机控制面 / worker 拆分
+- 集群级发布编排与故障补偿
+- Git 镜像与双向同步
+- 跨地域复制、灾备与主从切换
+
+## 7. 完成定义
+
+平台达到“完整标准”时，应满足：
+
+- 多语言项目可通过统一 Repository / Release 流程接入
+- Git、S3、Upload 等来源都能收敛到标准 Release
+- 支持多级缓存、本地物化、快速切换和稳定回滚
+- 支持单机部署与分布式扩展两条部署路径
+- Git、对象存储、节点切换和审计链路具备可观测、可诊断、可重试能力
+

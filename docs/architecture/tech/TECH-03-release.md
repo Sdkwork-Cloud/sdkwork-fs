@@ -1,0 +1,167 @@
+> Migrated from `docs/架构/03-版本控制与发布模型.md` on 2026-06-24.
+> Owner: SDKWork maintainers
+
+# 版本控制与发布模型
+
+## 1. 设计目标
+
+`sdkworkfs` 需要同时支持 Git 版本语义和对象存储版本语义，但运行时只能消费一种统一模型。这个统一模型就是 `Release`。
+
+## 2. 版本分层
+
+### 2.1 Source Version
+
+来源：
+
+- Git commit
+- Git tag
+- Git branch head
+- 一次对象存储导入批次
+
+作用：
+
+- 记录源头
+- 触发构建或发布
+- 提供追溯和审计
+
+### 2.2 Release Version
+
+定义：
+
+- 一个不可变的、可部署的版本单元
+- 由 `ReleaseId` 唯一标识
+
+组成：
+
+- Manifest
+- Object Index
+- Build Metadata
+- Source Mapping
+
+### 2.3 Runtime Version
+
+定义：
+
+- 节点本地当前实际使用的 Release
+- 通过 `current -> releases/<releaseId>` 表示
+
+作用：
+
+- 支撑本地运行
+- 支撑原子切换
+- 支撑快速回滚
+
+## 3. 发布通道
+
+| 通道 | 默认来源 | 发布规则 |
+| --- | --- | --- |
+| `dev` | `main` | 支持连续快照 Release |
+| `test` | `main` 或测试分支 | 受控快照 Release |
+| `staging` | tag / 受控分支 | 预发布 Release |
+| `prod` | tag / release | 正式不可变 Release |
+
+## 4. Git 与 Release 的关系
+
+- 开发真相源默认是 `main`
+- 正式发布真相源默认是 `tag/release`
+- 运行时真相源永远是 `Release`
+
+### 4.1 Git 版本机制
+
+Git 版本关注的是：
+
+- 分支演进
+- 提交历史
+- tag 标记
+- 协作与审计
+
+Git 版本不直接决定运行时切换，只负责提供 Source Version 和触发发布。
+
+### 4.2 对象版本机制
+
+对象版本关注的是：
+
+- 对象内容哈希
+- 对象元数据
+- 可选对象存储版本号
+- 分块与大文件传输
+
+对象版本用于保证内容一致性和缓存命中，不直接表达业务发布边界。
+
+### 4.3 Release 版本机制
+
+Release 版本关注的是：
+
+- 可部署性
+- 不可变性
+- 切换与回滚
+- 节点传播
+
+Release 是 Git 版本和对象版本之间的统一桥梁。
+
+## 5. Release 状态机
+
+```text
+CREATED
+-> OBJECTS_INDEXED
+-> VERIFIED
+-> PUBLISHED
+-> DISTRIBUTED
+-> ACTIVATED
+-> RETIRED
+```
+
+失败状态：
+
+- `FAILED_BUILD`
+- `FAILED_VERIFY`
+- `FAILED_DISTRIBUTE`
+- `FAILED_ACTIVATE`
+
+## 6. Manifest 标准
+
+Manifest 至少包含：
+
+```json
+{
+  "appId": "demo-app",
+  "releaseId": "rel_20260406_001",
+  "channel": "prod",
+  "source": {
+    "type": "git",
+    "commit": "abcdef",
+    "tag": "v1.0.0"
+  },
+  "files": [
+    {
+      "path": "index.html",
+      "hash": "sha256:...",
+      "size": 1024,
+      "kind": "static"
+    }
+  ]
+}
+```
+
+## 7. 回滚规则
+
+- 回滚只能回到已验证且未损坏的 Release
+- 回滚不修改 Release 本体，只修改 Runtime Version 指向
+- 节点至少保留当前版本和上一个稳定版本
+
+推荐回滚规则：
+
+- `POST /api/v1/releases/{releaseId}:rollback` 只能针对当前激活版本发起
+- 回滚目标固定选择同应用、同环境下最近一个 `stable=true` 且存在激活记录的 Release
+- 回滚成功后 `application.currentReleaseId` 切回目标版本
+- 被回滚的当前版本会进入 `RETIRED`，回滚目标记录 `rollbackOf`
+- 以上动作会生成 `ROLLBACK_RELEASE` 操作记录和 release 审计记录
+
+## 8. 正式标准
+
+- 任何 Release 必须可映射到一个 Source Version
+- 任何节点必须知道当前 Runtime Version 和 previous Runtime Version
+- 任何 Release 都必须具备可校验哈希
+- 任何正式生产发布都必须支持审计与回滚
+- 任何 Git Source Version 与对象导入批次都必须最终收敛为 Release 才能被运行时消费
+

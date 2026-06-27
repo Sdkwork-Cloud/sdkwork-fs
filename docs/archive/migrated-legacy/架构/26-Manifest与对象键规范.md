@@ -15,7 +15,7 @@ Manifest 是 Release 的内容清单，是 Git 版本、对象版本和运行时
 ```json
 {
   "schemaVersion": "v1",
-  "tenantId": "tenant-a",
+  "tenantId": "100001",
   "appId": "app-demo",
   "releaseId": "rel_20260406_001",
   "manifestDigest": "sha256:abcd...",

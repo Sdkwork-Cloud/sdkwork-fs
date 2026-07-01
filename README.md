@@ -1,4 +1,5 @@
 # SdkworkFS
+repository-kind: foundation-dependency
 
 SdkworkFS 是一个面向多语言应用分发、版本切换、Git 托管、对象存储和跨节点运行的文件系统平台。自本轮架构重设开始，**整个系统的目标实现基线统一切换为全 Rust**。
 
